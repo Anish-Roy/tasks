@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LRU Cache Visualizer</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
+    --accent: #2f5d8a; --accent-soft: #e4edf6;
+    --hit: #2e7d4f; --hit-soft: #e1f2e7;
+    --miss: #b23b3b; --miss-soft: #f8e3e1;
+    --new: #2f5d8a; --new-soft: #e4edf6;
+    --evict: #b8731c; --evict-soft: #fbeedb;
+    --sentinel: #ecebe5;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #1f1f1c; --ink: #ecebe5; --muted: #9c9a92; --line: #33332e;
+      --accent: #8db4dc; --accent-soft: #22303d;
+      --hit: #7cc79b; --hit-soft: #1d3326;
+      --miss: #e88b85; --miss-soft: #3b2221;
+      --new: #8db4dc; --new-soft: #22303d;
+      --evict: #e2a75a; --evict-soft: #3a2c19;
+      --sentinel: #2a2a26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 18px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .hidden { display: none !important; }
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+  h2 .mono { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+  /* loader */
+  #loader p { margin: 0 0 10px; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .tip { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .tip code { background: var(--sentinel); padding: 1px 5px; border-radius: 4px; }
+
+  /* controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+  .group { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 4px; }
+  input[type=text], input[type=number] {
+    font: 14px var(--mono); padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); width: 110px; }
+  input[type=number] { width: 70px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  button { font: 600 14px system-ui, sans-serif; padding: 8px 14px; border-radius: 7px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:not(:disabled):hover { filter: brightness(1.05); border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+  /* result banner */
+  #result { font-family: var(--mono); font-size: 14px; padding: 10px 12px; border-radius: 8px;
+            background: var(--sentinel); margin-bottom: 14px; min-height: 42px; }
+  #result.hit { background: var(--hit-soft); color: var(--hit); }
+  #result.miss { background: var(--miss-soft); color: var(--miss); }
+  #result.err { background: var(--miss-soft); color: var(--miss); }
+  #result.warn { background: var(--evict-soft); color: var(--evict); }
+  #result .trace { white-space: pre-wrap; margin-top: 6px; font-size: 12px; opacity: 0.9; }
+  .notes { margin: 0 0 14px; padding: 10px 12px 10px 30px; border-radius: 8px; background: var(--evict-soft); color: var(--evict); font-size: 14px; }
+  .notes li + li { margin-top: 4px; }
+
+  /* list */
+  .list-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .meter { font-size: 13px; color: var(--muted); }
+  .meter b { color: var(--ink); }
+  .slots { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 6px; }
+  .slots i { width: 10px; height: 10px; border-radius: 2px; background: var(--line); display: inline-block; }
+  .slots i.on { background: var(--accent); }
+  #list { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 0; padding: 8px 0 4px; min-height: 92px; }
+  .node { position: relative; min-width: 84px; padding: 8px 10px; border-radius: 9px; border: 2px solid var(--line);
+          background: var(--panel); text-align: center; transition: background .3s, border-color .3s; }
+  .node .k { font: 600 15px var(--mono); }
+  .node .v { font: 13px var(--mono); color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .tag { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font: 600 10px system-ui, sans-serif;
+               text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 9px; white-space: nowrap; }
+  .node.sentinel { min-width: 60px; background: var(--sentinel); color: var(--muted); border-style: dashed; }
+  .node.sentinel .k { font-size: 12px; letter-spacing: .05em; }
+  .node.hit { border-color: var(--hit); background: var(--hit-soft); }
+  .node.hit .tag { background: var(--hit); color: var(--panel); }
+  .node.new { border-color: var(--new); background: var(--new-soft); }
+  .node.new .tag { background: var(--new); color: var(--panel); }
+  .node.lru { border-style: dashed; border-color: var(--evict); }
+  .node.bad { border-color: var(--miss); }
+  .arrow { width: 34px; height: 20px; color: var(--muted); flex: none; }
+  .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .empty { color: var(--muted); font-size: 14px; padding: 0 12px; }
+  #evicted { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--evict); min-height: 24px; }
+  #evicted .node { border-color: var(--evict); background: var(--evict-soft); min-width: 60px; padding: 4px 8px;
+                   animation: fade 1.6s ease forwards; }
+  @keyframes fade { 0%, 60% { opacity: 1; } 100% { opacity: .35; } }
+
+  /* grid */
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td { font-family: var(--mono); }
+  tr.flash td { background: var(--accent-soft); }
+  #log { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; font: 13px var(--mono); }
+  #log li { padding: 5px 2px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+  #log .n { color: var(--muted); min-width: 22px; }
+  #log .ok { color: var(--hit); } #log .bad { color: var(--miss); } #log .warn { color: var(--evict); }
+  .problems { background: var(--miss-soft); color: var(--miss); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 14px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  pre.src { font: 12.5px/1.55 var(--mono); overflow: auto; margin: 12px 0 0; padding: 10px 0; background: var(--bg); border-radius: 8px; }
+  pre.src span { display: block; padding: 0 12px; }
+  pre.src span::before { content: attr(data-n); display: inline-block; width: 30px; color: var(--muted); }
+  pre.src span.errline { background: var(--miss-soft); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent);
+             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>LRU Cache Visualizer</h1>
+    <span class="status" id="status"><span class="spinner"></span>Starting Python in the browser…</span>
+  </header>
+
+  <section class="panel hidden" id="loader">
+    <h2>Load your code</h2>
+    <p>This page runs the <code>lru_cache.py</code> file that sits in the same folder.
+       Your browser did not let the page read it straight from disk, so please pick it here:</p>
+    <div class="drop" id="drop">
+      <p>Drop <code>lru_cache.py</code> here, or</p>
+      <input type="file" id="picker" accept=".py,text/x-python,text/plain">
+    </div>
+    <p class="tip">Tip: to skip this step, open a terminal in this folder, run
+      <code>python -m http.server</code>, then visit <code>http://localhost:8000/lru_cache_visualizer.html</code>.</p>
+  </section>
+
+  <section class="panel" id="app-controls">
+    <div class="controls">
+      <div class="group">
+        <label>Capacity <input type="number" id="cap" value="3" min="0" max="20"></label>
+        <button id="reset" disabled>New cache</button>
+        <button id="reload" disabled title="Read lru_cache.py again after you edit it">Reload code</button>
+      </div>
+      <div class="group">
+        <label>Key <input type="text" id="key" placeholder="e.g. 1"></label>
+        <label>Value <input type="text" id="val" placeholder="e.g. apple"></label>
+        <button class="primary" id="get" disabled>get(key)</button>
+        <button class="primary" id="put" disabled>put(key, value)</button>
+      </div>
+      <div class="group">
+        <button id="demo" disabled>Play demo</button>
+        <button id="rand" disabled>Random op</button>
+      </div>
+    </div>
+    <p class="hint">Keys and values are read like Python: <code>1</code> is a number, <code>apple</code> or <code>"apple"</code> is a string.
+      Press Enter in the Key box for get, or in the Value box for put.</p>
+  </section>
+
+  <section class="panel">
+    <div id="result">Nothing run yet.</div>
+    <ul class="notes hidden" id="notes"></ul>
+    <div class="problems hidden" id="problems"></div>
+
+    <div class="list-head">
+      <h2>Doubly linked list <span class="mono" id="listAttr"></span></h2>
+      <span class="meter" id="meter"></span>
+    </div>
+    <div id="list"></div>
+    <div class="ends"><span>← most recently used</span><span>least recently used (evicted next) →</span></div>
+    <div id="evicted"></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Hash map <span class="mono" id="mapAttr"></span></h2>
+      <table>
+        <thead><tr><th>key</th><th>points to node</th><th>value</th></tr></thead>
+        <tbody id="map"></tbody>
+      </table>
+      <p class="hint">The dict finds any node in O(1). The linked list keeps the use order, so moving or removing a node is O(1) too.</p>
+    </section>
+    <section class="panel">
+      <h2>Operation log</h2>
+      <ol id="log"></ol>
+    </section>
+  </div>
+
+  <section class="panel">
+    <details id="srcBox">
+      <summary>Code being run: <span class="mono" id="srcName">lru_cache.py</span></summary>
+      <pre class="src" id="src"></pre>
+    </details>
+  </section>
+</main>
+
+<script type="text/x-python" id="bridge">
+import sys, json, ast, inspect, traceback, importlib
+
+_state = {"mod": None, "cls": None, "inst": None}
+
+def _find_class(mod):
+    preferred = ["lru_cache", "LRUCache", "LruCache", "LRU_Cache", "Cache"]
+    for name in preferred:
+        obj = getattr(mod, name, None)
+        if inspect.isclass(obj) and callable(getattr(obj, "get", None)) and callable(getattr(obj, "put", None)):
+            return obj
+    for name, obj in vars(mod).items():
+        if inspect.isclass(obj) and obj.__module__ == mod.__name__ \
+                and callable(getattr(obj, "get", None)) and callable(getattr(obj, "put", None)):
+            return obj
+    return None
+
+def _short_tb():
+    etype, err, tb = sys.exc_info()
+    frames = [f for f in traceback.extract_tb(tb) if f.filename.endswith("lru_cache.py")]
+    lines = [f"  line {f.lineno}, in {f.name}:  {f.line}" for f in frames]
+    return f"{etype.__name__}: {err}", "\n".join(lines)
+
+def load(capacity):
+    sys.modules.pop("lru_cache", None)
+    importlib.invalidate_caches()
+    try:
+        mod = importlib.import_module("lru_cache")
+    except Exception:
+        msg, tb = _short_tb()
+        return json.dumps({"ok": False, "error": msg, "trace": tb or traceback.format_exc(limit=-3)})
+    cls = _find_class(mod)
+    if cls is None:
+        return json.dumps({"ok": False, "error": "No class with get() and put() methods was found in lru_cache.py"})
+    try:
+        inst = cls(capacity)
+    except Exception:
+        msg, tb = _short_tb()
+        return json.dumps({"ok": False, "error": msg, "trace": tb})
+    _state.update(mod=mod, cls=cls, inst=inst)
+    return json.dumps({"ok": True, "className": cls.__name__, "state": _snapshot()})
+
+def _parse(text):
+    text = text.strip()
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return text
+
+def _is_node(o):
+    return hasattr(o, "key") and hasattr(o, "next") and hasattr(o, "prev")
+
+def _snapshot():
+    inst = _state["inst"]
+    attrs = vars(inst)
+    cache_name = lst_name = cap_name = None
+    for name, val in attrs.items():
+        if cache_name is None and isinstance(val, dict):
+            cache_name = name
+        elif lst_name is None and hasattr(val, "head") and hasattr(val, "tail"):
+            lst_name = name
+    for name in ["limit", "capacity", "cap", "max_size", "maxsize", "size"]:
+        if isinstance(attrs.get(name), int):
+            cap_name = name
+            break
+    if cap_name is None:
+        for name, val in attrs.items():
+            if isinstance(val, int) and not isinstance(val, bool):
+                cap_name = name
+                break
+
+    snap = {"cacheAttr": cache_name, "listAttr": lst_name, "capAttr": cap_name,
+            "capacity": attrs.get(cap_name) if cap_name else None,
+            "list": [], "map": [], "problems": []}
+
+    if lst_name:
+        lst = attrs[lst_name]
+        head, tail = lst.head, lst.tail
+        node, prev, seen = head.next, head, set()
+        while node is not None and node is not tail:
+            if id(node) in seen or len(seen) > 500:
+                snap["problems"].append("The list loops back on itself (a cycle).")
+                break
+            seen.add(id(node))
+            snap["list"].append({"id": id(node), "key": repr(getattr(node, "key", None)),
+                                 "value": repr(getattr(node, "value", None)),
+                                 "prevOk": getattr(node, "prev", None) is prev})
+            prev, node = node, getattr(node, "next", None)
+        if node is None:
+            snap["problems"].append("Walking forward from head never reached tail.")
+        elif getattr(tail, "prev", None) is not prev:
+            snap["problems"].append("tail.prev does not point to the last node.")
+        for item in snap["list"]:
+            if not item["prevOk"]:
+                snap["problems"].append(f"Node {item['key']} has a wrong prev pointer.")
+
+    if cache_name:
+        list_ids = {n["id"] for n in snap["list"]}
+        for k, v in attrs[cache_name].items():
+            nid = id(v) if _is_node(v) else None
+            snap["map"].append({"key": repr(k), "nodeId": nid,
+                                "value": repr(getattr(v, "value", v)),
+                                "inList": nid in list_ids if lst_name else True})
+            if lst_name and nid not in list_ids:
+                snap["problems"].append(f"Key {k!r} is in the dict but its node is not in the list.")
+        if lst_name and len(snap["map"]) != len(snap["list"]):
+            snap["problems"].append(f"The dict has {len(snap['map'])} keys but the list has {len(snap['list'])} nodes.")
+    cap = snap["capacity"]
+    if isinstance(cap, int) and cache_name and len(snap["map"]) > cap:
+        snap["problems"].append(f"The cache holds {len(snap['map'])} items, more than its capacity of {cap}.")
+    return snap
+
+def op(name, key_text, value_text=None):
+    inst = _state["inst"]
+    if inst is None:
+        return json.dumps({"ok": False, "error": "Cache is not loaded."})
+    key = _parse(key_text)
+    args = [key] if name == "get" else [key, _parse(value_text or "")]
+    call = f"{name}({', '.join(repr(a) for a in args)})"
+    before = _snapshot()
+    try:
+        result = getattr(inst, name)(*args)
+        out = {"ok": True, "call": call, "result": repr(result)}
+    except Exception:
+        msg, tb = _short_tb()
+        out = {"ok": False, "call": call, "error": msg, "trace": tb}
+    after = _snapshot()
+    bk = {n["key"] for n in before["list"]} | {m["key"] for m in before["map"]}
+    ak = {n["key"] for n in after["list"]} | {m["key"] for m in after["map"]}
+    out["evicted"] = sorted(bk - ak)
+    out["added"] = sorted(ak - bk)
+    out["key"] = repr(key)
+    stored = {m["key"]: m["value"] for m in before["map"]}
+    out["wasPresent"] = repr(key) in stored
+    notes = []
+    if name == "get" and out["ok"]:
+        if out["wasPresent"]:
+            if out["result"] != stored[repr(key)]:
+                notes.append(f"Key {key!r} was in the cache with value {stored[repr(key)]}, "
+                             f"but get returned {out['result']}.")
+            elif after["list"] and after["list"][0]["key"] != repr(key):
+                notes.append(f"Key {key!r} was not moved to the front (most recently used).")
+        elif out["result"] != "-1":
+            notes.append(f"Key {key!r} was not in the cache. The assignment says get should return -1, "
+                         f"but it returned {out['result']}.")
+    if name == "put" and out["ok"]:
+        if after["list"] and after["list"][0]["key"] != repr(key):
+            notes.append(f"Key {key!r} is not at the front after put.")
+        cap = before["capacity"]
+        if not out["wasPresent"] and isinstance(cap, int) and len(before["map"]) < cap and out["evicted"]:
+            notes.append("Something was evicted even though the cache was not full.")
+    out["notes"] = notes
+    out["state"] = after
+    return json.dumps(out)
+</script>
+<script src="https://cdn.jsdelivr.net/npm/pyodide@314.0.7/pyodide.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let py = null, source = null, className = "", opCount = 0, busy = false, demoTimer = null;
+  const nodeNames = new Map(); let nextName = 1;
+  const nodeName = (id) => { if (!nodeNames.has(id)) nodeNames.set(id, "#" + nextName++); return nodeNames.get(id); };
+
+  const setStatus = (html) => { $("status").innerHTML = html; };
+  const enable = (on) => ["reset", "reload", "get", "put", "demo", "rand"].forEach((id) => ($(id).disabled = !on));
+
+  // ---------- loading ----------
+  async function fetchSource() {
+    try {
+      const r = await fetch("lru_cache.py", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.text();
+    } catch (e) { return null; }
+  }
+
+  function showLoader() { $("loader").classList.remove("hidden"); }
+
+  function readPicked(file) {
+    if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => { $("srcName").textContent = file.name; useSource(fr.result); };
+    fr.readAsText(file);
+  }
+  $("picker").addEventListener("change", (e) => readPicked(e.target.files[0]));
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => readPicked(e.dataTransfer.files[0]));
+
+  function renderSource(errLines = []) {
+    if (source == null) return;
+    $("src").innerHTML = source.replace(/\n$/, "").split("\n")
+      .map((l, i) => `<span data-n="${i + 1}"${errLines.includes(i + 1) ? ' class="errline"' : ""}>${esc(l) || " "}</span>`).join("");
+  }
+
+  async function useSource(text) {
+    source = text;
+    $("loader").classList.add("hidden");
+    renderSource();
+    if (py) newCache();
+  }
+
+  async function boot() {
+    if (typeof loadPyodide !== "function") {
+      setStatus("Could not download Pyodide (Python for the browser). Please check your internet connection and reload.");
+      return;
+    }
+    const pyReady = loadPyodide();
+    const text = await fetchSource();
+    if (text != null) { source = text; renderSource(); }
+    else showLoader();   // ask for the file now, while Python is still loading
+    try { py = await pyReady; }
+    catch (e) { setStatus("Could not start Python. This page needs an internet connection to download Pyodide. (" + esc(e.message) + ")"); return; }
+    py.runPython("import sys\nsys.path.insert(0, '/home/pyodide')");
+    py.runPython($("bridge").textContent);
+    if (source != null) newCache();
+    else setStatus("Python is ready. Waiting for <b>lru_cache.py</b>…");
+  }
+
+  // ---------- talking to Python ----------
+  function call(fn, ...args) {
+    py.FS.writeFile("/home/pyodide/lru_cache.py", source);
+    return JSON.parse(py.globals.get(fn)(...args));
+  }
+
+  function errLinesFrom(trace) {
+    return [...String(trace || "").matchAll(/line (\d+)/g)].map((m) => +m[1]);
+  }
+
+  function newCache() {
+    stopDemo();
+    const cap = parseInt($("cap").value, 10);
+    const r = call("load", Number.isFinite(cap) ? cap : 3);
+    nodeNames.clear(); nextName = 1; opCount = 0;
+    $("log").innerHTML = ""; $("evicted").innerHTML = ""; $("notes").classList.add("hidden");
+    if (!r.ok) {
+      enable(false); $("reload").disabled = false; $("reset").disabled = false;
+      setStatus("Could not use <b>lru_cache.py</b>");
+      showResult("err", `Loading failed: ${esc(r.error)}`, r.trace);
+      renderSource(errLinesFrom(r.trace)); $("srcBox").open = true;
+      render({ list: [], map: [], problems: [] }, {});
+      return;
+    }
+    className = r.className;
+    enable(true);
+    setStatus(`Running <b>lru_cache.py</b> → class <b>${esc(className)}</b>(${esc(r.state.capacity ?? cap)})`);
+    showResult("", `Created ${esc(className)}(${esc(cap)}). Try a put or get.`);
+    renderSource();
+    render(r.state, {});
+  }
+
+  function showResult(kind, html, trace) {
+    const el = $("result");
+    el.className = kind;
+    el.innerHTML = html + (trace ? `<div class="trace">${esc(trace)}</div>` : "");
+  }
+
+  function run(name, keyText, valText) {
+    if (busy || !py) return;
+    if (keyText.trim() === "") { $("key").focus(); return; }
+    if (name === "put" && valText.trim() === "") { $("val").focus(); return; }
+    busy = true;
+    const r = call("op", name, keyText, valText ?? null);
+    busy = false;
+    opCount++;
+
+    let kind, text, logCls;
+    if (!r.ok) {
+      kind = "err"; logCls = "bad";
+      text = `${esc(r.call)} raised ${esc(r.error)}`;
+      renderSource(errLinesFrom(r.trace));
+    } else if (name === "get") {
+      kind = r.notes.length ? "warn" : r.wasPresent ? "hit" : "miss"; logCls = r.notes.length ? "warn" : r.wasPresent ? "ok" : "bad";
+      text = `${esc(r.call)} → ${esc(r.result)}   (${r.wasPresent ? "hit" : "miss"})`;
+      renderSource();
+    } else {
+      kind = ""; logCls = r.notes.length ? "warn" : "";
+      text = `${esc(r.call)} → ${r.wasPresent ? "updated" : "added"}`;
+      if (r.evicted.length) text += `, evicted key ${r.evicted.map(esc).join(", ")}`;
+      renderSource();
+    }
+    showResult(kind, text, r.ok ? "" : r.trace);
+
+    const notes = $("notes");
+    if (r.notes && r.notes.length) { notes.innerHTML = r.notes.map((n) => `<li>${esc(n)}</li>`).join(""); notes.classList.remove("hidden"); }
+    else notes.classList.add("hidden");
+
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="n">${opCount}.</span><span class="${logCls}">${text}${r.notes && r.notes.length ? " ⚠" : ""}</span>`;
+    $("log").prepend(li);
+
+    render(r.state, { key: r.key, kind: name === "get" ? (r.wasPresent && r.ok ? "hit" : "") : (r.ok ? "new" : ""), evicted: r.evicted, evictedState: r });
+  }
+
+  // ---------- drawing ----------
+  const ARROW = `<svg class="arrow" viewBox="0 0 34 20" aria-hidden="true"><path d="M3 7h26m-5-4 5 4-5 4M31 13H5m5-4-5 4 5 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+  function render(state, hl) {
+    // FLIP: remember where nodes were
+    const before = {};
+    document.querySelectorAll("#list .node[data-id]").forEach((n) => (before[n.dataset.id] = n.getBoundingClientRect()));
+    // remember values of nodes about to vanish so we can show what got evicted
+    const prevVals = {};
+    document.querySelectorAll("#list .node[data-key]").forEach((n) => (prevVals[n.dataset.key] = n.dataset.val));
+
+    $("listAttr").textContent = state.listAttr ? `self.${state.listAttr}` : "";
+    $("mapAttr").textContent = state.cacheAttr ? `self.${state.cacheAttr}` : "";
+
+    const cap = state.capacity, n = state.map.length || state.list.length;
+    const slots = Number.isInteger(cap) && cap <= 30 ? `<span class="slots">${Array.from({ length: cap }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("")}</span>` : "";
+    $("meter").innerHTML = `<b>${n}</b> / ${cap ?? "?"} ${state.capAttr ? `<span class="mono">(self.${esc(state.capAttr)})</span>` : ""}${slots}`;
+
+    const items = state.list.map((node, i) => {
+      const cls = ["node"];
+      let tag = "";
+      if (hl.key === node.key && hl.kind) { cls.push(hl.kind); tag = hl.kind === "hit" ? "just used" : "just put"; }
+      if (i === state.list.length - 1 && state.list.length > 1 && !tag) { cls.push("lru"); }
+      if (!node.prevOk) cls.push("bad");
+      return `<div class="${cls.join(" ")}" data-id="${node.id}" data-key="${esc(node.key)}" data-val="${esc(node.value)}" title="node ${nodeName(node.id)}">
+        ${tag ? `<span class="tag">${tag}</span>` : ""}<div class="k">${esc(node.key)}</div><div class="v">${esc(node.value)}</div></div>`;
+    });
+    const body = items.length ? items.join(ARROW) : `<span class="empty">empty</span>`;
+    $("list").innerHTML = state.listAttr === null && !state.list.length
+      ? `<span class="empty">Could not find a linked list (an attribute with head and tail) on the cache object.</span>`
+      : `<div class="node sentinel"><div class="k">HEAD</div><div class="v">dummy</div></div>${ARROW}${body}${ARROW}<div class="node sentinel"><div class="k">TAIL</div><div class="v">dummy</div></div>`;
+
+    // FLIP: animate from old spot to new spot
+    document.querySelectorAll("#list .node[data-id]").forEach((el) => {
+      const old = before[el.dataset.id];
+      if (!old) { el.animate([{ opacity: 0, transform: "scale(.8)" }, { opacity: 1, transform: "none" }], { duration: 350, easing: "ease-out" }); return; }
+      const now = el.getBoundingClientRect();
+      const dx = old.left - now.left, dy = old.top - now.top;
+      if (dx || dy) el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 450, easing: "cubic-bezier(.2,.7,.2,1)" });
+    });
+
+    // evicted strip
+    const ev = $("evicted");
+    if (hl.evicted && hl.evicted.length) {
+      ev.innerHTML = `<span>Evicted:</span>` + hl.evicted.map((k) =>
+        `<div class="node"><div class="k">${esc(k)}</div><div class="v">${esc(prevVals[k] ?? "")}</div></div>`).join("");
+    } else if (hl.kind !== undefined) ev.innerHTML = "";
+
+    // hash map
+    $("map").innerHTML = state.map.length
+      ? state.map.map((m) => `<tr class="${hl.key === m.key ? "flash" : ""}"><td>${esc(m.key)}</td><td>${m.nodeId != null ? "node " + nodeName(m.nodeId) : "—"}${m.inList ? "" : " ⚠ not in list"}</td><td>${esc(m.value)}</td></tr>`).join("")
+      : `<tr><td colspan="3" style="color:var(--muted);font-family:inherit">empty</td></tr>`;
+    // name list nodes the same way as the map
+    document.querySelectorAll("#list .node[data-id]").forEach((el) => (el.title = "node " + nodeName(+el.dataset.id)));
+
+    const p = $("problems");
+    if (state.problems && state.problems.length) {
+      p.innerHTML = "<b>The cache's internal state looks broken:</b><br>" + state.problems.map(esc).join("<br>");
+      p.classList.remove("hidden");
+    } else p.classList.add("hidden");
+  }
+
+  // ---------- demo + random ----------
+  const DEMO = [
+    ["put", "1", "'one'"], ["put", "2", "'two'"], ["put", "3", "'three'"],
+    ["get", "1"], ["put", "4", "'four'"], ["get", "2"], ["put", "3", "'THREE'"],
+    ["get", "4"], ["put", "5", "'five'"], ["get", "1"], ["get", "3"],
+  ];
+  function stopDemo() { if (demoTimer) { clearTimeout(demoTimer); demoTimer = null; $("demo").textContent = "Play demo"; } }
+  function playDemo() {
+    if (demoTimer) { stopDemo(); return; }
+    $("cap").value = 3; newCache();
+    $("demo").textContent = "Stop demo";
+    let i = 0;
+    const step = () => {
+      if (i >= DEMO.length) { stopDemo(); return; }
+      const [op, k, v] = DEMO[i++];
+      $("key").value = k; $("val").value = v ?? "";
+      run(op, k, v);
+      demoTimer = setTimeout(step, 1300);
+    };
+    demoTimer = setTimeout(step, 400);
+  }
+  function randomOp() {
+    const k = String(1 + Math.floor(Math.random() * 6));
+    if (Math.random() < 0.5) { $("key").value = k; run("get", k); }
+    else { const v = "'v" + Math.floor(Math.random() * 100) + "'"; $("key").value = k; $("val").value = v; run("put", k, v); }
+  }
+
+  // ---------- wiring ----------
+  $("get").onclick = () => { stopDemo(); run("get", $("key").value); };
+  $("put").onclick = () => { stopDemo(); run("put", $("key").value, $("val").value); };
+  $("reset").onclick = newCache;
+  $("demo").onclick = playDemo;
+  $("rand").onclick = () => { stopDemo(); randomOp(); };
+  $("reload").onclick = async () => {
+    const text = await fetchSource();
+    if (text != null) { source = text; renderSource(); newCache(); }
+    else { showLoader(); $("picker").value = ""; $("picker").click(); }
+  };
+  $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") $("get").click(); });
+  $("val").addEventListener("keydown", (e) => { if (e.key === "Enter") $("put").click(); });
+  $("cap").addEventListener("keydown", (e) => { if (e.key === "Enter") newCache(); });
+
+  boot().catch((e) => console.error(e));
+})();
+</script>
+</body>
+</html>
